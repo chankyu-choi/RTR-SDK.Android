@@ -8,6 +8,8 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.ImageFormat;
 import android.graphics.Paint;
@@ -17,9 +19,9 @@ import android.graphics.Rect;
 import android.hardware.Camera;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.preference.PreferenceManager;
-import android.renderscript.Allocation;
 import android.util.Log;
 import android.view.Display;
 import android.view.Surface;
@@ -37,24 +39,11 @@ import android.widget.TextView;
 import com.abbyy.mobile.rtr.Engine;
 import com.abbyy.mobile.rtr.ITextCaptureService;
 import com.abbyy.mobile.rtr.Language;
+import com.abbyy.mobile.rtr.IRecognitionCoreAPI;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-
-import android.util.Log;
-import android.os.Environment;
-import java.io.File;
-import android.graphics.BitmapFactory;
-import android.graphics.Bitmap;
-import android.graphics.Bitmap.CompressFormat;
-import java.nio.ByteBuffer;
-import java.io.ByteArrayOutputStream;
-import java.io.FileOutputStream;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.FileNotFoundException;
-import java.io.PrintWriter;
-import android.graphics.YuvImage;
 
 public class MainActivity extends Activity {
 
@@ -119,60 +108,8 @@ public class MainActivity extends Activity {
 	private static final String BUTTON_TEXT_START = "Start";
 	private static final String BUTTON_TEXT_STOP = "Stop";
 	private static final String BUTTON_TEXT_STARTING = "Starting...";
+	private static final String TAG = "chankyu.choi";
 
-    private static final String curr_lang = "CHN";
-    private static int g_idx = 0;
-    //private static int g_receive_id = 0;
-    private static boolean g_runnable = true;
-    private static String g_prev = new String("");
-
-	byte [] getNV21(int inputWidth, int inputHeight, Bitmap scaled) {
-		// Reference (Variation) : https://gist.github.com/wobbals/5725412
-
-		int [] argb = new int[inputWidth * inputHeight];
-
-		//Log.i(TAG, "scaled : " + scaled);
-		scaled.getPixels(argb, 0, inputWidth, 0, 0, inputWidth, inputHeight);
-
-		byte [] yuv = new byte[inputWidth*inputHeight*3/2];
-		encodeYUV420SP(yuv, argb, inputWidth, inputHeight);
-
-		scaled.recycle();
-
-		return yuv;
-	}
-
-	void encodeYUV420SP(byte[] yuv420sp, int[] argb, int width, int height) {
-		final int frameSize = width * height;
-
-		int yIndex = 0;
-		int uvIndex = frameSize;
-
-		int a, R, G, B, Y, U, V;
-		int index = 0;
-		for (int j = 0; j < height; j++) {
-			for (int i = 0; i < width; i++) {
-
-				//a = (argb[index] & 0xff000000) >> 24; // a is not used obviously
-				R = (argb[index] & 0xff0000) >> 16;
-				G = (argb[index] & 0xff00) >> 8;
-				B = (argb[index] & 0xff) >> 0;
-
-				// well known RGB to YUV algorithm
-				Y = ( (  66 * R + 129 * G +  25 * B + 128) >> 8) +  16;
-				U = ( ( -38 * R -  74 * G + 112 * B + 128) >> 8) + 128;
-				V = ( ( 112 * R -  94 * G -  18 * B + 128) >> 8) + 128;
-
-				yuv420sp[yIndex++] = (byte) ((Y < 0) ? 0 : ((Y > 255) ? 255 : Y));
-				if (j % 2 == 0 && index % 2 == 0) {
-					yuv420sp[uvIndex++] = (byte)((V<0) ? 0 : ((V > 255) ? 255 : V));
-					yuv420sp[uvIndex++] = (byte)((U<0) ? 0 : ((U > 255) ? 255 : U));
-				}
-
-				index ++;
-			}
-		}
-	}
 
 	// To communicate with the Text Capture Service we will need this callback:
 	private ITextCaptureService.Callback textCaptureCallback = new ITextCaptureService.Callback() {
@@ -190,78 +127,6 @@ public class MainActivity extends Activity {
 		public void onFrameProcessed( ITextCaptureService.TextLine[] lines,
 			ITextCaptureService.ResultStabilityStatus resultStatus, ITextCaptureService.Warning warning )
 		{
-			Log.d("chankyu.choi", "resultStatus : " + resultStatus);
-            synchronized(this) {
-                if (lines == null && g_runnable == false) {
-                    File rootPath = Environment.getExternalStorageDirectory();
-                    File txtPath = new File(rootPath + "/OCR_BMT/" + curr_lang + "/", (g_idx-1) + ".txt");
-                    Log.d("chankyu.choi", "Out : " + txtPath);
-                    if (txtPath.exists() != true) {
-                        try {
-                            FileOutputStream f = new FileOutputStream(txtPath);
-                            PrintWriter pw = new PrintWriter(f);
-                            pw.println("");
-                            Log.d("chankyu.choi", "NULL");
-                            pw.flush();
-                            pw.close();
-                            f.close();
-
-                        } catch (FileNotFoundException e) {
-                            e.printStackTrace();
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                        g_runnable = true;
-                    }
-                } else if (lines != null && g_runnable == false) {
-                    File rootPath = Environment.getExternalStorageDirectory();
-                    File txtPath = new File(rootPath + "/OCR_BMT/" + curr_lang + "/", (g_idx-1) + ".txt");
-                    Log.d("chankyu.choi", "Out : " + txtPath);
-                    if (txtPath.exists() != true) {
-                        try {
-                            FileOutputStream f = new FileOutputStream(txtPath);
-                            PrintWriter pw = new PrintWriter(f);
-                            boolean isNew = false;
-
-							String curr = new String("");
-							for (int i = 0; i < lines.length; i++) {
-								curr += lines[i].Text;
-							}
-							curr = curr.replaceAll("\\s+","");
-
-							Log.d("chankyu.choi", "g_prev : " + g_prev);
-							Log.d("chankyu.choi", "curr : " + curr);
-
-							if (curr.equals(g_prev) == false) {
-								isNew = true;
-								Log.d("chankyu.choi", "curr != g_prev");
-							}
-
-                            if (isNew) {
-								g_prev = curr;
-                                for (int i = 0; i < lines.length; i++) {
-                                    pw.println(lines[i].Text);
-                                    Log.d("chankyu.choi", lines[i].Text);
-                                }
-                            } else {
-                                pw.println("");
-								Log.d("chankyu.choi", "SAME as before");
-                            }
-
-                            pw.flush();
-                            pw.close();
-                            f.close();
-
-                        } catch (FileNotFoundException e) {
-                            e.printStackTrace();
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                        g_runnable = true;
-                    }
-                }
-            }
-			/*
 			// Frame has been processed. Here we process recognition results. In this sample we
 			// stop when we get stable result. This callback may continue being called for some time
 			// even after the service has been stopped while the calls queued to this thread (UI thread)
@@ -290,7 +155,6 @@ public class MainActivity extends Activity {
 					startButton.playSoundEffect( android.view.SoundEffectConstants.CLICK );
 				}
 			}
-			*/
 		}
 
 		@Override
@@ -318,36 +182,9 @@ public class MainActivity extends Activity {
 		@Override
 		public void onPreviewFrame( byte[] data, Camera camera )
 		{
-            synchronized(this) {
-				if (g_idx >= 1000) {
-					Log.d("chankyu.choi", "Completed OCR Test");
-					int pid = android.os.Process.myPid();
-					android.os.Process.killProcess(pid);
-				}
-				if (g_runnable) {
-					g_runnable = false;
-					File rootPath = Environment.getExternalStorageDirectory();
-                    Log.d("chankyu.choi", "=========================================================");
-                    File txtPath = new File(rootPath + "/OCR_BMT/" + curr_lang + "/", g_idx + ".txt");
-                    if (txtPath.exists() != true) {
-                        Log.d("chankyu.choi", "In : " + g_idx);
-                        File imagePath = new File(rootPath + "/OCR_BMT/" + curr_lang + "/", g_idx + ".jpg");
-                        int header_size = 7;
-                        BitmapFactory.Options bmOptions = new BitmapFactory.Options();
-                        Bitmap bitmap = BitmapFactory.decodeFile(imagePath.getAbsolutePath(), bmOptions);
-                        byte[] nv21 = getNV21(bitmap.getWidth(), bitmap.getHeight(), bitmap);
-                        for (int sub_idx = 0; sub_idx < nv21.length; sub_idx++)
-                            data[header_size + sub_idx] = nv21[sub_idx];
-                        textCaptureService.submitRequestedFrame(data);
-                        g_idx += 1;
-                    } else {
-                        Log.d("chankyu.choi", "File exists : " + txtPath);
-                        int pid = android.os.Process.myPid();
-                        android.os.Process.killProcess(pid);
-                    }
-                }
-            }
-            // textCaptureService.submitRequestedFrame( data );
+			// The buffer that we have given to the camera in ITextCaptureService.Callback.onRequestLatestFrame
+			// above have been filled. Send it back to the Text Capture Service
+			textCaptureService.submitRequestedFrame( data );
 		}
 	};
 
@@ -562,6 +399,46 @@ public class MainActivity extends Activity {
 		try {
 			engine = Engine.load( this, licenseFileName );
 			textCaptureService = engine.createTextCaptureService( textCaptureCallback );
+
+			IRecognitionCoreAPI recognitionCoreAPI = engine.createRecognitionCoreAPI();
+			IRecognitionCoreAPI.TextRecognitionCallback callback = new IRecognitionCoreAPI.TextRecognitionCallback() {
+				@Override public boolean onProgress( int i, IRecognitionCoreAPI.Warning warning ) { return false; }
+
+				@Override public void onTextOrientationDetected( int i ) { }
+
+				@Override public void onError( Exception e )
+				{
+					Log.e( TAG, "Recognition error: \n" + e.getMessage(), e );
+				}
+			};
+			recognitionCoreAPI.getTextRecognitionSettings().setRecognitionLanguage( Language.Japanese );
+
+
+			File rootPath = Environment.getExternalStorageDirectory();
+			BitmapFactory.Options bmOptions = new BitmapFactory.Options();
+
+			int imageSize = 5;
+			for (int fIdx=0; fIdx<imageSize; fIdx++) {
+				File imagePath = new File(rootPath + "/images/" + fIdx + ".jpg");
+				Bitmap bitmap = BitmapFactory.decodeFile(imagePath.getAbsolutePath(), bmOptions);
+				recognitionCoreAPI.getTextRecognitionSettings().setAreaOfInterest(new Rect(0, 0, bitmap.getWidth(), bitmap.getHeight()));
+				IRecognitionCoreAPI.TextBlock[] textBlocks = recognitionCoreAPI.recognizeText(bitmap, callback );
+				if ( textBlocks != null ) {
+					for (int bIdx=0; bIdx<textBlocks.length; bIdx++) {
+						if (textBlocks[bIdx].TextLines != null) {
+							for (int tIdx = 0; tIdx < textBlocks[bIdx].TextLines.length; tIdx++) {
+								Log.d(TAG, textBlocks[bIdx].TextLines[tIdx].Text);
+							}
+						} else {
+							Log.d(TAG, "\ttextBlocks[" + bIdx + "].TextLines == null");
+						}
+					}
+				} else {
+					Log.d(TAG, "\ttextBlocks == null");
+				}
+			}
+			android.os.Process.killProcess(android.os.Process.myPid());
+
 			return true;
 		} catch( java.io.IOException e ) {
 			// Troubleshooting for the developer
@@ -592,14 +469,11 @@ public class MainActivity extends Activity {
 		// Clear error message
 		errorTextView.setText( "" );
 		// Start the service
-        //textCaptureService.start( cameraPreviewSize.width, cameraPreviewSize.height, orientation, areaOfInterest );
-        textCaptureService.start( cameraPreviewSize.width, cameraPreviewSize.height, orientation, new Rect(0, 0, cameraPreviewSize.height, cameraPreviewSize.width) );
-
-        // Change the text on the start button to 'Stop'
-        startButton.setText( BUTTON_TEXT_STOP );
-        startButton.setEnabled( true );
-
-    }
+		textCaptureService.start( cameraPreviewSize.width, cameraPreviewSize.height, orientation, areaOfInterest );
+		// Change the text on the start button to 'Stop'
+		startButton.setText( BUTTON_TEXT_STOP );
+		startButton.setEnabled( true );
+	}
 
 	// Stop recognition
 	void stopRecognition()
@@ -853,8 +727,6 @@ public class MainActivity extends Activity {
 			// loading the engine the preview will never start and we will never attempt calling the service
 			surfaceViewWithOverlay.getHolder().addCallback( surfaceCallback );
 		}
-
-
 
 		layout.setOnClickListener( clickListener );
 	}
